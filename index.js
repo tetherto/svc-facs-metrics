@@ -1,9 +1,9 @@
 'use strict'
 
-const Base = require('bfx-facs-base')
+const Base = require('@bitfinex/bfx-facs-base')
 const async = require('async')
 const SystemMetricsCollector = require('./lib/system-metrics-collector')
-const PromHyperswarmExporter = require('./lib/metrics-hyperswarm-exporter')
+const MetricsHyperswarmExporter = require('./lib/metrics-hyperswarm-exporter')
 const MetricsRegistry = require('./lib/metrics-registry')
 
 class MetricsFacility extends Base {
@@ -42,7 +42,7 @@ class MetricsFacility extends Base {
           throw new Error('ERR_METRICS_CONFIG_MISSING_REQUIRED_FIELDS: topic and secretKey are required')
         }
 
-        this.exporter = new PromHyperswarmExporter({
+        this.exporter = new MetricsHyperswarmExporter({
           app: this.app,
           instance: this.instance,
           baseLabels: { ...(this.conf.baseLabels || {}), ...(this.baseLabels || {}) },
@@ -192,17 +192,18 @@ class MetricsFacility extends Base {
   }
 
   /**
-   * Parse a Prometheus exposition document and merge every sample into the
+   * Parse a metrics exposition document and merge every sample into the
    * registry, attaching extra labels (e.g. `{ job_id, endpoint, model, replica }`).
    *
    * This is a passthrough for scraping another exporter (e.g. vLLM's native
-   * `/metrics`). Samples are recorded as gauges holding their exact current
-   * value, so re-ingesting each flush cycle keeps values fresh. Histogram and
-   * summary component samples (`_bucket`/`_sum`/`_count`/`quantile`) are carried
-   * through as individual named series; their family-level `# TYPE` is not
-   * reconstructed. Non-finite values (`+Inf`/`-Inf`/`NaN`) are skipped.
+   * `/metrics`, which uses this text exposition format). Samples are recorded
+   * as gauges holding their exact current value, so re-ingesting each flush
+   * cycle keeps values fresh. Histogram and summary component samples
+   * (`_bucket`/`_sum`/`_count`/`quantile`) are carried through as individual
+   * named series; their family-level `# TYPE` is not reconstructed.
+   * Non-finite values (`+Inf`/`-Inf`/`NaN`) are skipped.
    *
-   * @param {string} text - Prometheus exposition text
+   * @param {string} text - Metrics exposition text
    * @param {Object} [extraLabels={}] - Labels merged into every sample
    */
   ingestExposition (text, extraLabels = {}) {
@@ -233,7 +234,7 @@ class MetricsFacility extends Base {
   }
 
   /**
-   * Parse a single Prometheus exposition sample line into name/labels/value.
+   * Parse a single metrics exposition sample line into name/labels/value.
    *
    * @param {string} line - Trimmed non-comment exposition line
    * @returns {{ name: string, labels: Object, value: number }|null} Parsed sample or null
@@ -264,7 +265,7 @@ class MetricsFacility extends Base {
   }
 
   /**
-   * Parse the label body of a Prometheus sample (the content between braces).
+   * Parse the label body of an exposition sample (the content between braces).
    *
    * @param {string} body - Label body, e.g. `le="0.1",model="x"`
    * @returns {Object} Label key/value pairs

@@ -1,13 +1,12 @@
 # svc-facs-metrics
 
-Metrics collection facility for svc services with Prometheus integration via Hyperswarm.
+Metrics collection facility for svc services, forwarding metrics via Hyperswarm to tether-wrk-monitor.
 
 ## Features
 
 - **Automatic System Metrics**: CPU, memory, and process metrics collected by default
 - **Custom Metrics**: Support for Gauges, Counters, and Histograms
 - **Hyperswarm Transport**: Push metrics via Hyperswarm to tether-wrk-monitor
-- **Prometheus Integration**: Metrics forwarded to Prometheus Push Gateway
 - **Self-configuring**: Loads configuration from `config/facs/metrics.config.json`
 
 ## Installation
@@ -128,7 +127,7 @@ When `collectSystemMetrics` is enabled, the following metrics are automatically 
 ## Architecture
 
 ```
-Service → svc-facs-metrics → Hyperswarm → tether-wrk-monitor → Prometheus Push Gateway → Prometheus
+Service → svc-facs-metrics → Hyperswarm → tether-wrk-monitor
 ```
 
 ## Examples
