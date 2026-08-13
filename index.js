@@ -13,6 +13,10 @@ class MetricsFacility extends Base {
     this.name = 'metrics'
     this.instance = opts.instance || `${process.pid}`
     this.app = opts.app || 'app'
+    // Labels attached to every series this worker exports. Passed as opts so a
+    // worker can supply values only known at runtime (job id, replica id) rather
+    // than static config; config-level baseLabels still apply underneath.
+    this.baseLabels = opts.baseLabels || null
     this._hasConf = true
     this.init()
   }
@@ -44,7 +48,7 @@ class MetricsFacility extends Base {
         this.exporter = new PromHyperswarmExporter({
           app: this.app,
           instance: this.instance,
-          baseLabels: this.conf.baseLabels,
+          baseLabels: { ...(this.conf.baseLabels || {}), ...(this.baseLabels || {}) },
           topic: this.conf.topic,
           secretKey: this.conf.secretKey,
           flushInterval: this.conf.flushInterval || 15000
