@@ -13,9 +13,6 @@ class MetricsFacility extends Base {
     this.name = 'metrics'
     this.instance = opts.instance || `${process.pid}`
     this.app = opts.app || 'app'
-    // Labels attached to every series this worker exports. Passed as opts so a
-    // worker can supply values only known at runtime (job id, replica id) rather
-    // than static config; config-level baseLabels still apply underneath.
     this.baseLabels = opts.baseLabels || null
     this._hasConf = true
     this.init()
