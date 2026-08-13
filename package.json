@@ -1,0 +1,53 @@
+{
+  "name": "svc-facs-metrics",
+  "version": "1.0.0",
+  "description": "Metrics collection facility for svc services with Prometheus integration via Hyperswarm",
+  "main": "index.js",
+  "scripts": {
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "test": "brittle tests/{,**/}*.test.js",
+    "test:coverage": "brittle --coverage tests/{,**/}*.test.js",
+    "posttest": "npm run lint"
+  },
+  "keywords": [
+    "metrics",
+    "prometheus",
+    "hyperswarm",
+    "monitoring",
+    "observability"
+  ],
+  "author": {
+    "name": "prdn",
+    "email": "paolo@bitfinex.com"
+  },
+  "maintainers": [
+    {
+      "name": "prdn",
+      "email": "paolo@bitfinex.com"
+    }
+  ],
+  "dependencies": {
+    "async": "3.2.6",
+    "b4a": "1.6.7",
+    "bfx-facs-base": "git+https://github.com/bitfinexcom/bfx-facs-base.git",
+    "hyperswarm": "4.13.1"
+  },
+  "devDependencies": {
+    "brittle": "3.16.3",
+    "sinon": "15.0.0",
+    "standard": "17.1.2"
+  },
+  "engine": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tetherto/svc-facs-metrics.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tetherto/svc-facs-metrics/issues"
+  },
+  "homepage": "https://github.com/tetherto/svc-facs-metrics#readme"
+}
