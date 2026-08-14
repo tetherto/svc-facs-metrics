@@ -21,7 +21,7 @@ class MetricsFacility extends Base {
   init () {
     super.init()
 
-    this.registry = new MetricsRegistry()
+    this.registry = new MetricsRegistry({ maxSeries: this.conf?.maxSeries })
     this.systemCollector = new SystemMetricsCollector()
     this.exporter = null
     this.isEnabled = false
@@ -51,10 +51,10 @@ class MetricsFacility extends Base {
           flushInterval: this.conf.flushInterval || 15000
         })
 
-        await this.exporter.start()
+        await this.exporter.ready()
         this.isEnabled = true
 
-        if (this.conf.collectSystemMetrics !== false) {
+        if (this.conf.collectSystemMetrics === true) {
           const interval = this.conf.systemMetricsInterval || 10000
           this.systemMetricsTimer = setInterval(
             () => this._collectSystemMetrics(),
@@ -83,10 +83,9 @@ class MetricsFacility extends Base {
           this.flushTimer = null
         }
 
-        this.registry.clearGauges()
         this._flush()
         if (this.exporter) {
-          await this.exporter.stop()
+          await this.exporter.close()
         }
       },
       next => { super._stop(next) }

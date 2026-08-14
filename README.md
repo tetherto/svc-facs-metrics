@@ -27,7 +27,8 @@ Create `config/facs/metrics.config.json` in your worker:
   "secretKey": "your-secret-key-here",
   "collectSystemMetrics": true,
   "systemMetricsInterval": 10000,
-  "flushInterval": 15000
+  "flushInterval": 15000,
+  "maxSeries": 10000
 }
 ```
 
@@ -39,9 +40,47 @@ Create `config/facs/metrics.config.json` in your worker:
 - **app**: Application identifier (used as `app` label in metrics)
 - **topic**: Hyperswarm topic (use same as logging - typically `pino.logs`)
 - **secretKey**: Authentication key (use same as logging secretKey)
-- **collectSystemMetrics**: Auto-collect Node.js process and OS metrics
+- **collectSystemMetrics**: Auto-collect Node.js process and OS metrics. **Opt-in** — must be
+  exactly `true`; any other value (including omitting it) leaves collection off
 - **systemMetricsInterval**: Interval in ms for system metrics collection (default: 10000)
 - **flushInterval**: Interval in ms to flush metrics (default: 15000)
+- **maxSeries**: Optional cap on distinct series held in the registry (default: no cap). See
+  [Memory and delivery behaviour](#memory-and-delivery-behaviour)
+
+## Memory and delivery behaviour
+
+Worth understanding before running this in production, particularly if the monitor can be
+unreachable for long stretches.
+
+**Nothing is buffered across an outage.** Every flush hands the registry's current contents to
+the exporter and then clears the gauges, whether or not the send succeeded — if there is no
+authenticated connection, `sendMetrics` returns early and those gauge values are simply
+dropped. Memory therefore does **not** grow while disconnected.
+
+That is the right trade-off for this data: a gauge only has a current value, so replaying a
+backlog of stale samples has no value, and buffering across a long outage is how a monitoring
+outage turns into an OOM.
+
+**What each metric type does across a disconnect:**
+
+| Type | Behaviour |
+|---|---|
+| Gauge | Dropped each flush; the next successful flush sends the newest value |
+| Counter | Never cleared, so the accumulated total survives and the next successful flush reports it correctly — no lost increments |
+| Histogram | Never cleared; fixed-size bucket array per series, so `sum`/`count`/buckets stay accurate |
+
+**Memory is bounded by label cardinality, not by time or outage duration.** The registry holds
+one entry per unique metric name + label set. Counters and histograms are never evicted, so a
+label carrying unbounded values (a request id, a user id, a file path) grows the registry for
+the lifetime of the process — the standard Prometheus-client cardinality rule applies here too.
+
+Set **`maxSeries`** as a safety net: once the registry holds that many series, new ones are
+dropped and a single warning is logged, while existing series keep updating. Leave it unset for
+no cap.
+
+**Recovery.** The exporter registers its connection handler once at `start()`; Hyperswarm
+re-dials the topic peer by itself, so a dropped connection is re-adopted and re-authenticated
+automatically. An errored socket is destroyed rather than left half-open.
 
 ## Usage
 
