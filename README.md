@@ -25,10 +25,14 @@ Create `config/facs/metrics.config.json` in your worker:
   "app": "your-worker-name",
   "topic": "pino.logs",
   "secretKey": "your-secret-key-here",
-  "collectSystemMetrics": true,
-  "systemMetricsInterval": 10000,
   "flushInterval": 15000,
-  "maxSeries": 10000
+  "maxSeries": 10000,
+  "collectors": [
+    {
+      "collector": "@tetherto/svc-facs-metrics/lib/collectors/system-metrics-collector",
+      "interval": 10000
+    }
+  ]
 }
 ```
 
@@ -40,12 +44,96 @@ Create `config/facs/metrics.config.json` in your worker:
 - **app**: Application identifier (used as `app` label in metrics)
 - **topic**: Hyperswarm topic (use same as logging - typically `pino.logs`)
 - **secretKey**: Authentication key (use same as logging secretKey)
-- **collectSystemMetrics**: Auto-collect Node.js process and OS metrics. **Opt-in** — must be
-  exactly `true`; any other value (including omitting it) leaves collection off
-- **systemMetricsInterval**: Interval in ms for system metrics collection (default: 10000)
+- **collectors**: Collectors to run and how often — see [Collectors](#collectors). Nothing is
+  collected unless listed here
 - **flushInterval**: Interval in ms to flush metrics (default: 15000)
 - **maxSeries**: Optional cap on distinct series held in the registry (default: no cap). See
   [Memory and delivery behaviour](#memory-and-delivery-behaviour)
+
+## Collectors
+
+Anything sampled on an interval is a **collector**. A collector writes into the registry
+itself and declares each metric's type, so adding one needs no change to this facility.
+
+### Configuring collectors
+
+```json
+{
+  "collectors": [
+    {
+      "collector": "@tetherto/svc-facs-metrics/lib/collectors/system-metrics-collector",
+      "interval": 10000
+    },
+    {
+      "collector": "./lib/collectors/queue-depth",
+      "interval": 5000,
+      "opts": { "name": "jobs" }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `collector` | **Always a module reference, never a keyword** — a path beginning with `.` (resolved from the worker's working directory), an absolute path, or a resolvable module id. The facility keeps no catalogue of collectors, so it imports none of them, including its own |
+| `interval` | Collection interval in ms (required, positive) |
+| `opts` | Passed to the collector's constructor alongside the registry |
+| `enabled` | Set `false` to keep an entry in config without running it |
+
+References are resolved from the **worker's** working directory, so a module id works
+regardless of whether the facility is a normal install, an `npm link`, or a `file:` dependency.
+
+A collector that fails to resolve or throws during collection is logged and skipped — it cannot
+stop the other collectors or take the worker down. Nothing is collected unless it is listed:
+there is no implicit default.
+
+### Writing a collector
+
+```js
+const { BaseCollector } = require('@tetherto/svc-facs-metrics')
+
+class QueueDepthCollector extends BaseCollector {
+  collect () {
+    this.gauge('queue_depth', this.opts.queue.length, { queue: this.opts.name })
+    this.counter('queue_processed_total', this.opts.queue.drainedSinceLastCollect())
+  }
+}
+
+module.exports = QueueDepthCollector
+```
+
+`collect()` may be async. Use `gauge()`, `counter()` and `histogram()` to declare each
+metric's type explicitly — nothing is inferred from the metric name. **`counter()` takes the
+delta since the last collection, not a cumulative total**, because the registry adds what it is
+given. An optional `close()` is awaited when the facility stops.
+
+### Registering from code
+
+Config can only name a module, so a collector needing a live dependency — a connection, a
+fetch function, a service handle — is registered programmatically:
+
+```js
+this.metrics_m0.addCollector(MyCollector, {
+  key: 'my-collector',
+  interval: 15000,
+  opts: { fetchText: () => this.proxy.scrape() }
+})
+
+this.metrics_m0.removeCollector('my-collector')
+```
+
+`addCollector` accepts a class (constructed with the registry plus `opts`) or a ready
+instance, and works after the facility has started.
+
+### Event-driven metrics
+
+Collectors are for *sampling*. Metrics tied to events — a request completing, an error being
+returned — are recorded directly, since there is nothing to poll:
+
+```js
+this.metrics_m0.recordCounter('http_requests_total', 1, { route, status })
+this.metrics_m0.recordHistogram('http_request_duration_seconds', seconds, { route })
+```
 
 ## Memory and delivery behaviour
 
@@ -141,7 +229,8 @@ this.metrics_m0.recordHistogram('custom_duration', duration, { type: 'custom' })
 
 ## System Metrics
 
-When `collectSystemMetrics` is enabled, the following metrics are automatically collected:
+When `lib/collectors/system-metrics-collector` is listed in `collectors`, the following are
+collected:
 
 ### Memory Metrics
 - `process_resident_memory_bytes` - Resident memory size

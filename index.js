@@ -1,10 +1,11 @@
 'use strict'
 
-const Base = require('@bitfinex/bfx-facs-base')
+const path = require('path')
 const async = require('async')
-const SystemMetricsCollector = require('./lib/system-metrics-collector')
-const MetricsHyperswarmExporter = require('./lib/metrics-hyperswarm-exporter')
+const Base = require('@bitfinex/bfx-facs-base')
 const MetricsRegistry = require('./lib/metrics-registry')
+const BaseCollector = require('./lib/collectors/base-collector')
+const MetricsHyperswarmExporter = require('./lib/metrics-hyperswarm-exporter')
 
 class MetricsFacility extends Base {
   constructor (caller, opts, ctx) {
@@ -22,12 +23,8 @@ class MetricsFacility extends Base {
     super.init()
 
     this.registry = new MetricsRegistry({ maxSeries: this.conf?.maxSeries })
-    this.systemCollector = new SystemMetricsCollector()
-    this.exporter = null
     this.isEnabled = false
-
-    this.systemMetricsTimer = null
-    this.flushTimer = null
+    this.collectors = new Map()
   }
 
   _start (cb) {
@@ -54,13 +51,7 @@ class MetricsFacility extends Base {
         await this.exporter.ready()
         this.isEnabled = true
 
-        if (this.conf.collectSystemMetrics === true) {
-          const interval = this.conf.systemMetricsInterval || 10000
-          this.systemMetricsTimer = setInterval(
-            () => this._collectSystemMetrics(),
-            interval
-          )
-        }
+        this._startConfiguredCollectors()
 
         const flushInterval = this.conf.flushInterval || 15000
         this.flushTimer = setInterval(
@@ -74,10 +65,7 @@ class MetricsFacility extends Base {
   _stop (cb) {
     async.series([
       async () => {
-        if (this.systemMetricsTimer) {
-          clearInterval(this.systemMetricsTimer)
-          this.systemMetricsTimer = null
-        }
+        await this._stopCollectors()
         if (this.flushTimer) {
           clearInterval(this.flushTimer)
           this.flushTimer = null
@@ -93,40 +81,118 @@ class MetricsFacility extends Base {
   }
 
   /**
-   * Collect system metrics
    * @private
    */
-  _collectSystemMetrics () {
-    if (!this.isEnabled) return
+  _startConfiguredCollectors () {
+    const configured = Array.isArray(this.conf.collectors) ? this.conf.collectors : []
 
-    const metrics = this.systemCollector.collect()
+    for (const entry of configured) {
+      if (!entry || entry.enabled === false) continue
 
-    Object.entries(metrics.memory).forEach(([name, value]) => {
-      this.recordGauge(name, value)
-    })
-
-    Object.entries(metrics.cpu).forEach(([name, value]) => {
-      const type = name.includes('_total') ? 'counter' : 'gauge'
-      if (type === 'counter') {
-        this.recordCounter(name, value)
-      } else {
-        this.recordGauge(name, value)
+      try {
+        this.addCollector(this._resolveCollector(entry.collector), {
+          interval: entry.interval,
+          key: entry.key || String(entry.collector),
+          opts: entry.opts
+        })
+      } catch (err) {
+        console.error(`Failed to start collector '${entry.collector}': ${err.message}`)
       }
-    })
-
-    Object.entries(metrics.system).forEach(([name, value]) => {
-      this.recordGauge(name, value)
-    })
-
-    Object.entries(metrics.process).forEach(([name, value]) => {
-      if (typeof value === 'number') {
-        this.recordGauge(name, value)
-      }
-    })
+    }
   }
 
   /**
-   * Flush metrics to exporter
+   * @param {string|Function} ref - Module path/id, or a class
+   * @returns {Function} Collector class
+   * @private
+   */
+  _resolveCollector (ref) {
+    if (typeof ref === 'function') return ref
+    if (typeof ref !== 'string' || !ref) throw new Error('ERR_COLLECTOR_REF_INVALID')
+
+    const target = ref.startsWith('.') ? path.resolve(process.cwd(), ref) : ref
+    const resolved = require.resolve(target, { paths: [process.cwd()] })
+    const loaded = require(resolved)
+
+    return loaded && loaded.default ? loaded.default : loaded
+  }
+
+  /**
+   * @param {Function|Object} collector - Collector class or instance
+   * @param {Object} [params={}] - `{ interval, key, opts }`
+   * @returns {string} Key the collector was registered under
+   */
+  addCollector (collector, { interval, key, opts = {} } = {}) {
+    const Collector = collector
+    const instance = typeof Collector === 'function'
+      ? new Collector({ registry: this.registry, caller: this.caller, ...opts })
+      : Collector
+
+    if (typeof instance.collect !== 'function') {
+      throw new Error('ERR_COLLECTOR_COLLECT_NOT_A_FUNCTION')
+    }
+
+    const id = key || instance.name
+    const every = Number(interval)
+
+    if (!Number.isFinite(every) || every <= 0) {
+      throw new Error(`ERR_COLLECTOR_INTERVAL_INVALID: ${id}`)
+    }
+
+    this.removeCollector(id)
+
+    const timer = setInterval(() => this._runCollector(id), every)
+    this.collectors.set(id, { instance, timer, interval: every })
+
+    return id
+  }
+
+  /**
+   * @param {string} key - Key returned by `addCollector`
+   * @returns {boolean} True when a collector was removed
+   */
+  removeCollector (key) {
+    const entry = this.collectors.get(key)
+    if (!entry) return false
+
+    clearInterval(entry.timer)
+    this.collectors.delete(key)
+
+    return true
+  }
+
+  /**
+   * @param {string} key - Collector key
+   * @private
+   */
+  async _runCollector (key) {
+    const entry = this.collectors.get(key)
+    if (!entry || !this.isEnabled) return
+
+    try {
+      await entry.instance.collect()
+    } catch (err) {
+      console.error(`Collector '${key}' failed: ${err.message}`)
+    }
+  }
+
+  /**
+   * @private
+   */
+  async _stopCollectors () {
+    for (const [key, entry] of Array.from(this.collectors.entries())) {
+      clearInterval(entry.timer)
+      this.collectors.delete(key)
+
+      try {
+        await entry.instance.close()
+      } catch (err) {
+        console.error(`Collector '${key}' close failed: ${err.message}`)
+      }
+    }
+  }
+
+  /**
    * @private
    */
   _flush () {
@@ -189,101 +255,7 @@ class MetricsFacility extends Base {
       return duration
     }
   }
-
-  /**
-   * Parse a metrics exposition document and merge every sample into the
-   * registry, attaching extra labels (e.g. `{ job_id, endpoint, model, replica }`).
-   *
-   * This is a passthrough for scraping another exporter (e.g. vLLM's native
-   * `/metrics`, which uses this text exposition format). Samples are recorded
-   * as gauges holding their exact current value, so re-ingesting each flush
-   * cycle keeps values fresh. Histogram and summary component samples
-   * (`_bucket`/`_sum`/`_count`/`quantile`) are carried through as individual
-   * named series; their family-level `# TYPE` is not reconstructed.
-   * Non-finite values (`+Inf`/`-Inf`/`NaN`) are skipped.
-   *
-   * @param {string} text - Metrics exposition text
-   * @param {Object} [extraLabels={}] - Labels merged into every sample
-   */
-  ingestExposition (text, extraLabels = {}) {
-    if (!text || typeof text !== 'string') return
-
-    const helps = {}
-
-    for (const rawLine of text.split('\n')) {
-      const line = rawLine.trim()
-      if (!line) continue
-
-      if (line.startsWith('#')) {
-        const meta = line.match(/^#\s+(HELP|TYPE)\s+(\S+)\s+(.*)$/)
-        if (meta && meta[1] === 'HELP') helps[meta[2]] = meta[3].trim()
-        continue
-      }
-
-      const sample = this._parseExpositionSample(line)
-      if (!sample) continue
-
-      this.registry.setGauge(
-        sample.name,
-        sample.value,
-        { ...sample.labels, ...extraLabels },
-        { help: helps[sample.name] }
-      )
-    }
-  }
-
-  /**
-   * Parse a single metrics exposition sample line into name/labels/value.
-   *
-   * @param {string} line - Trimmed non-comment exposition line
-   * @returns {{ name: string, labels: Object, value: number }|null} Parsed sample or null
-   * @private
-   */
-  _parseExpositionSample (line) {
-    const braceIdx = line.indexOf('{')
-    let name
-    let labels = {}
-    let valueToken
-
-    if (braceIdx === -1) {
-      const parts = line.split(/\s+/)
-      name = parts[0]
-      valueToken = parts[1]
-    } else {
-      const closeIdx = line.lastIndexOf('}')
-      if (closeIdx === -1) return null
-      name = line.slice(0, braceIdx).trim()
-      labels = this._parseExpositionLabels(line.slice(braceIdx + 1, closeIdx))
-      valueToken = line.slice(closeIdx + 1).trim().split(/\s+/)[0]
-    }
-
-    const value = Number(valueToken)
-    if (!name || !Number.isFinite(value)) return null
-
-    return { name, labels, value }
-  }
-
-  /**
-   * Parse the label body of an exposition sample (the content between braces).
-   *
-   * @param {string} body - Label body, e.g. `le="0.1",model="x"`
-   * @returns {Object} Label key/value pairs
-   * @private
-   */
-  _parseExpositionLabels (body) {
-    const labels = {}
-    const re = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"\\])*)"/g
-    let m
-
-    while ((m = re.exec(body)) !== null) {
-      labels[m[1]] = m[2]
-        .replace(/\\"/g, '"')
-        .replace(/\\n/g, '\n')
-        .replace(/\\\\/g, '\\')
-    }
-
-    return labels
-  }
 }
 
+MetricsFacility.BaseCollector = BaseCollector
 module.exports = MetricsFacility
