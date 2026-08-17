@@ -1,0 +1,34 @@
+{
+  "name": "@tetherto/svc-facs-metrics",
+  "version": "1.0.0",
+  "description": "Metrics collection facility that forwards application metrics over hyperswarm",
+  "main": "index.js",
+  "scripts": {
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "test": "brittle tests/{,**/}*.test.js",
+    "test:coverage": "brittle --coverage tests/{,**/}*.test.js",
+    "posttest": "npm run lint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tetherto/svc-facs-metrics.git"
+  },
+  "dependencies": {
+    "@bitfinex/bfx-facs-base": "^1.1.0",
+    "async": "^3.2.6",
+    "b4a": "^1.6.7",
+    "hyperswarm": "^4.13.1",
+    "ready-resource": "^1.2.0"
+  },
+  "devDependencies": {
+    "brittle": "^3.16.3",
+    "standard": "^17.1.2"
+  },
+  "author": "Ehtesham1996",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/tetherto/svc-facs-metrics/issues"
+  },
+  "homepage": "https://github.com/tetherto/svc-facs-metrics#readme"
+}

@@ -1,0 +1,17 @@
+{
+  "m0": {
+    "enabled": true,
+    "topic": "@svc/logs",
+    "secretKey": "your-secret-key-here",
+    "flushInterval": 15000,
+    "baseLabels": {
+      "stage": "dev"
+    },
+    "collectors": [
+      {
+        "collector": "@tetherto/svc-facs-metrics/lib/collectors/system-metrics-collector",
+        "interval": 10000
+      }
+    ]
+  }
+}
