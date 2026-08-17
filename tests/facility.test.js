@@ -268,9 +268,11 @@ test('SystemMetricsCollector records only numeric samples', async (t) => {
 test('addCollector schedules, removeCollector unschedules', async (t) => {
   const { fac } = stubFacility()
   let ticks = 0
+  let closed = false
 
   class Ticker extends MetricsFacility.BaseCollector {
     collect () { ticks++; this.gauge('ticks', ticks) }
+    close () { closed = true }
   }
 
   const key = fac.addCollector(Ticker, { interval: 10, key: 'ticker' })
@@ -280,8 +282,9 @@ test('addCollector schedules, removeCollector unschedules', async (t) => {
   await new Promise((resolve) => setTimeout(resolve, 45))
   t.ok(ticks >= 2, `collected repeatedly (${ticks} ticks)`)
 
-  t.ok(fac.removeCollector('ticker'), 'removed')
+  t.ok(await fac.removeCollector('ticker'), 'removed')
   t.is(fac.collectors.size, 0, 'unscheduled')
+  t.ok(closed, 'close() runs on removal')
 
   const seen = ticks
   await new Promise((resolve) => setTimeout(resolve, 30))

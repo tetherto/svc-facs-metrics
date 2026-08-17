@@ -151,12 +151,20 @@ class MetricsFacility extends Base {
    * @param {string} key - Key returned by `addCollector`
    * @returns {boolean} True when a collector was removed
    */
-  removeCollector (key) {
+  async removeCollector (key) {
     const entry = this.collectors.get(key)
     if (!entry) return false
 
     clearInterval(entry.timer)
     this.collectors.delete(key)
+
+    try {
+      if (entry.instance && typeof entry.instance.close === 'function') {
+        await entry.instance.close()
+      }
+    } catch (err) {
+      console.error(`Collector '${key}' close failed: ${err.message}`)
+    }
 
     return true
   }
