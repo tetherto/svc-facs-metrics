@@ -292,20 +292,3 @@ async handleRequest(req, res) {
   }
 }
 ```
-
-### Custom Application Metrics
-
-```javascript
-// Track model agent counts in inference proxy
-_recordInferenceMetrics() {
-  const modelsCounts = this.inferenceService.getModelAgentCounts()
-  
-  for (const [model, count] of Object.entries(modelsCounts)) {
-    this.metrics_m0.recordGauge('inference_active_model_agents', count, {
-      model
-    }, {
-      help: 'Number of active inference agents per model'
-    })
-  }
-}
-```
